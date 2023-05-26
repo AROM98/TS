@@ -89,11 +89,72 @@ static int hello_read(const char *path, char *buf, size_t size, off_t offset,
     return size;
 }
 
+static int hello_chmod(const char *path, mode_t mode,
+		     struct fuse_file_info *fi)
+{
+	
+    printf("chmod called\n");
+    log_message("[RSYSLOG] chmod called");
+    (void) fi;
+	int res;
+
+	res = chmod(path, mode);
+	if (res == -1)
+		return -ENOENT;
+
+	return 0;
+}
+
+static int hello_chown(const char *path, uid_t uid, gid_t gid,
+		     struct fuse_file_info *fi)
+{
+	printf("chown called\n");
+    log_message("[RSYSLOG] chown called");
+    (void) fi;
+	int res;
+
+	res = lchown(path, uid, gid);
+	if (res == -1)
+		return -ENOENT;
+
+	return 0;
+}
+
+static int hello_write(const char *path, const char *buf, size_t size,
+		     off_t offset, struct fuse_file_info *fi)
+{
+	int fd;
+	int res;
+
+    printf("write called\n");
+    log_message("[RSYSLOG] write called");
+	(void) fi;
+	if(fi == NULL)
+		fd = open(path, O_WRONLY);
+	else
+		fd = fi->fh;
+	
+	if (fd == -1)
+		return -errno;
+
+	res = pwrite(fd, buf, size, offset);
+	if (res == -1)
+		res = -errno;
+
+	if(fi == NULL)
+		close(fd);
+	return res;
+}
+
 static struct fuse_operations hello_oper = {
     .getattr    = hello_getattr,
     .readdir    = hello_readdir,
     .open       = hello_open,
     .read       = hello_read,
+    .chmod      = hello_chmod,
+    .chown      = hello_chown,
+    .write		= hello_write,
+
 };
 
 int main(int argc, char *argv[])
