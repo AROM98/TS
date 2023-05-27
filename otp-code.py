@@ -1,9 +1,10 @@
 import pyotp
 import qrcode
 import sys
+import os
 
-if len(sys.argv) > 1:
-    name = sys.argv[1]
+if len(sys.argv) >= 1:
+    name = sys.argv[0]
 else:
     raise "Wrong arguments"
 
@@ -23,9 +24,9 @@ print("URI: " + uri)
 
 
 # Qr code generation step
-qrcode.make(uri).save("qr.png")
-
-file = open('key.txt', 'w')
+qrcode.make(uri).save(os.path.join(name, "qr.png"))
+print("Qrcode gerado!!")
+file = open(os.path.join(name, "key.txt"), 'w')
 
 file.write(key)
 

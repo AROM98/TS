@@ -48,17 +48,59 @@ static void log_message(const char *message) {
     closelog();  // Close connection to syslog
 }
 
-// para correr o script python OTP
-int run_python_script() {
+
+// gerar qrCode OTP
+int gen_code(){
+		//char* filename = "/home/pedro/TS/TS/otp.py";
+	//char* filename = "/home/kubuntuu/Desktop/TS/TS/otp.py";
+	log_message("[RSYSLOG] generating the code...");
+	
+	char filename[PATH_MAX];
+	strcpy(filename,cwd);
+
+	char f[] = "/otp-code.py";
+	strcat(filename,f);
+    printf("file %s\n", filename);
+
+
+	Py_Initialize();
+	
+	// Criar uma lista de argumentos
+    PyObject *argList = PyList_New(0);
+    PyObject *arg = PyUnicode_FromString(cwd);
+    PyList_Append(argList, arg);
+
+	// Passar a lista de argumentos para o Python
+    PySys_SetObject("argv", argList);
+
+    // Open the Python file
+    FILE* file = fopen(filename, "r");
+
+    if (file == NULL) {
+		perror("Error opening file");
+        printf("Error opening script file\n");
+        return -1;
+    }
+
+	PyRun_SimpleFile(file, filename);
+
+    Py_Finalize();
+	return 0;
+}
+
+
+
+// para correr o script python OTP de validação do código
+int validate_code() {
     
 	
-
+	log_message("[RSYSLOG] validating the code...");
 	//char* filename = "/home/pedro/TS/TS/otp.py";
 	//char* filename = "/home/kubuntuu/Desktop/TS/TS/otp.py";
 	char filename[PATH_MAX];
 	strcpy(filename,cwd);
 
-	char f[] = "/otp.py";
+	char f[] = "/otp-validation.py";
 	strcat(filename,f);
     printf("file %s\n", filename);
 
@@ -221,7 +263,7 @@ static int read_act( const char *path, char *buffer, size_t size, off_t offset, 
     }
 	else{
 		// se é o dono, então tem que se autenticar como tal.
-		int flag = run_python_script();
+		int flag = validate_code();
 		if (flag == -1) return -EACCES;
 	}
 
@@ -304,7 +346,7 @@ static int write_act( const char *path, const char *buffer, size_t size, off_t o
     }
 	else{
 		// se é o dono, então tem que se autenticar como tal.
-		int flag = run_python_script();
+		int flag = validate_code();
 		if (flag == -1) return -EACCES;
 	}
 
@@ -326,11 +368,12 @@ static struct fuse_operations operations = {
 int main(int argc, char *argv[]){   
 
 	if (getcwd(cwd, sizeof(cwd)) == NULL) {
-	
     	perror("getcwd() error");
     	return 1;
 	}
-    printf("Current working dir: %s\n", cwd);
+    
+	int flag = gen_code();
+	if (flag == -1) return 1;
 
 
     // Create a new arguments array with the -f option, to run in foreground
