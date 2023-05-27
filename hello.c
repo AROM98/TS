@@ -8,6 +8,8 @@
 #include <time.h>
 #include <stdlib.h>
 #include <sys/types.h>
+#include <syslog.h> 
+#include <Python.h>
 
 
  
@@ -26,6 +28,51 @@ int file_content_ind = -1;
 char directories[ 256 ][ 256 ];
 //indice
 int dir_ind = -1;
+
+// guarda o uid (user) do dono de cada ficheiro
+uid_t files_uid[256];
+// guarda o gid (group) do dono de cada ficheiro
+gid_t files_gid[256];
+
+// guarda o uid (user) do dono de cada diretorio
+uid_t directories_uid[256];
+// guarda o gid (group) do dono de cada diretorio
+gid_t directories_gid[256];
+
+
+// para fazer os logs
+static void log_message(const char *message) {
+    openlog("HelloFUSE", LOG_PID, LOG_USER);  // Open connection to syslog
+    syslog(LOG_INFO, "%s", message);  // Log the message using syslog
+    closelog();  // Close connection to syslog
+}
+
+// para correr o script python OTP
+void run_python_script() {
+    
+
+	char* filename = "/home/kubuntuu/Desktop/TS/TS/otp.py";
+    
+    // Open the Python file
+    FILE* file = fopen(filename, "r");
+
+    if (file == NULL) {
+		perror("Error opening file");
+        printf("Error opening script file\n");
+        return;
+    }
+
+	Py_Initialize();
+	PySys_SetArgv(0, "");
+
+    // Run the Python script
+    if (PyRun_SimpleFileExFlags(file, filename, 1, NULL) == -1) {
+        printf("Error running python script\n");
+    }
+
+    Py_Finalize();
+}
+
 
 
 // verifica se o diretorio ja foi um dos criados
@@ -59,6 +106,9 @@ int get_file( const char *path ){
 // definir os atributos dos ficheiros e diretorios
 static int getattr_act( const char *path, struct stat *st )
 {
+	// LOGS
+	printf("getattr called\n");
+    log_message("[RSYSLOG] getattr called");
 	
 	// definição das permissoes 
 	st->st_uid = getuid(); 
@@ -90,8 +140,30 @@ static int getattr_act( const char *path, struct stat *st )
 // ler os atributos dos ficheiros e diretorios
 static int readdir_act( const char *path, void *buffer, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi )
 {
+	//LOGS
+	printf("readdir called\n");
+    log_message("[RSYSLOG] readdir called");
+
+    int dir_id = is_dir(path);
+
+	// verifica se o diretorio existe
+    if(dir_id == -1)
+        return -ENOENT;
+
+	struct fuse_context *context;
+    context = fuse_get_context();  // Get context
+
+    // Check if the UID matches the directory's owner
+    /*
+	if(context->uid != directories_uid[dir_id]){
+        return -EACCES;  // Return an "Access denied" error
+	}
+	*/
+	
+
 	filler( buffer, ".", NULL, 0 ,0); 
 	filler( buffer, "..", NULL, 0 ,0); 
+
 	
 	if ( strcmp( path, "/" ) == 0 ) 
 	{
@@ -107,11 +179,33 @@ static int readdir_act( const char *path, void *buffer, fuse_fill_dir_t filler, 
 
 // realizar a leitura do ficheiro
 static int read_act( const char *path, char *buffer, size_t size, off_t offset, struct fuse_file_info *fi ){
+	
+	//LOGS
+	printf("read called\n");
+    log_message("[RSYSLOG] read called");
+
 	int file_id = get_file( path );
 	
 	if ( file_id == -1 )
 		return -1;
 	
+	// para verificar se o user tem permissao de ler o ficheiro (se é o dono neste caso)
+	struct fuse_context *context;
+    context = fuse_get_context();  // Get context
+
+    // Check if the UID matches the file's owner
+    if (context->uid != files_uid[file_id]) {
+        return -EACCES;  // Return an "Access denied" error
+    }
+	else{
+		// se é o dono, então tem que se autenticar como tal.
+		run_python_script();
+	}
+
+
+	printf("read command executed by (owner) user %d\n", context->uid);
+	log_message("[RSYSLOG] read command executed by owner");
+
 	char *content = files_content[ file_id ];
 	
 	memcpy( buffer, content + offset, size );
@@ -122,23 +216,43 @@ static int read_act( const char *path, char *buffer, size_t size, off_t offset, 
 
 // adicionar o um novo diretorio
 static int mkdir_act( const char *path, mode_t mode )
-{
+{	
+	//LOGS
+	printf("mkdir called\n");
+    log_message("[RSYSLOG] mkdir called");
+
 	path++;
 	dir_ind++;
 	strcpy( directories[ dir_ind ], path);
+
+	// para obter o uid e o gid do diretorio criado
+	struct fuse_context *context;
+    context = fuse_get_context();  // Get context
+    directories_uid[dir_ind] = context->uid;
+    directories_gid[dir_ind] = context->gid;
 	
 	return 0;
 }
 
 // adicionar um novo ficheiro
 static int mknod_act( const char *path, mode_t mode, dev_t rdev )
-{
+{	
+	//LOGS
+	printf("mknod called\n");
+	log_message("[RSYSLOG] mknod called");
+
 	path++;
 	file_ind++;
 	strcpy( files[ file_ind ],path );
 	
 	file_content_ind++;
 	strcpy( files_content[ file_content_ind ], "" );
+
+	// para obter o uid e o gid do ficheiro criado
+	struct fuse_context *context;
+    context = fuse_get_context();  // Get context
+    files_uid[file_ind] = context->uid;
+    files_gid[file_ind] = context->gid;
 	
 	return 0;
 }
@@ -146,6 +260,9 @@ static int mknod_act( const char *path, mode_t mode, dev_t rdev )
 // escrever em um ficheiro
 static int write_act( const char *path, const char *buffer, size_t size, off_t offset, struct fuse_file_info *info )
 {
+	//LOGS
+	printf("write called\n");
+	log_message("[RSYSLOG] write called");
 	
 	int file_idx = get_file( path );
 	
@@ -166,8 +283,16 @@ static struct fuse_operations operations = {
     .write		= write_act,
 };
 
-int main(int argc, char *argv[])
-{   
+int main(int argc, char *argv[]){   
+
+	char cwd[PATH_MAX];
+	if (getcwd(cwd, sizeof(cwd)) != NULL) {
+    	printf("Current working dir: %s\n", cwd);
+	} else {
+    	perror("getcwd() error");
+    	return 1;
+	}
+
     // Create a new arguments array with the -f option, to run in foreground
     char *argv_mod[] = { argv[0], argv[1], "-f", NULL };
     return fuse_main(3, argv_mod, &operations, NULL);

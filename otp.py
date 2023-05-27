@@ -1,5 +1,8 @@
 import pyotp
 import qrcode
+import os
+
+output_path = "/home/kubuntuu/Desktop/TS/TS/"
 
 key = pyotp.random_base32()
 
@@ -18,7 +21,7 @@ print("URI: " + uri)
 
 
 # Qr code generation step
-qrcode.make(uri).save("qr.png")
+qrcode.make(uri).save(os.path.join(output_path, "qr.png"))
 
 """Verifying stage starts"""
 
@@ -27,3 +30,5 @@ totp = pyotp.TOTP(key)
 # verifying the code
 if not totp.verify(input(("Enter the Code : "))):
     raise "Wrong code"
+else: 
+    print("Success!")
