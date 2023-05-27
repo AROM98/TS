@@ -131,10 +131,12 @@ int validate_code() {
     //     printf("Error running python script\n");
 	// 	return -1;
     // }
-	PyRun_SimpleFile(file, filename);
+	int res = PyRun_SimpleFile(file, filename);
 
     Py_Finalize();
-	return 0;
+
+	printf("res: %d\n", res);
+	return res;
 }
 
 
@@ -264,18 +266,23 @@ static int read_act( const char *path, char *buffer, size_t size, off_t offset, 
 	else{
 		// se é o dono, então tem que se autenticar como tal.
 		int flag = validate_code();
-		if (flag == -1) return -EACCES;
+		if (flag == -1) {
+			return -EACCES;
+		}
+		else{
+			printf("read command executed by (owner) user %d\n", context->uid);
+			log_message("[RSYSLOG] read command executed by owner");
+
+			char *content = files_content[ file_id ];
+			
+			memcpy( buffer, content + offset, size );
+				
+			return strlen( content ) - offset;
+		}
 	}
 
 
-	printf("read command executed by (owner) user %d\n", context->uid);
-	log_message("[RSYSLOG] read command executed by owner");
-
-	char *content = files_content[ file_id ];
 	
-	memcpy( buffer, content + offset, size );
-		
-	return strlen( content ) - offset;
 }
 
 
@@ -347,13 +354,14 @@ static int write_act( const char *path, const char *buffer, size_t size, off_t o
 	else{
 		// se é o dono, então tem que se autenticar como tal.
 		int flag = validate_code();
-		if (flag == -1) return -EACCES;
+		if (flag == -1){
+			return -EACCES;
+		}
+		else{
+			strcpy( files_content[ file_idx ], buffer ); 
+			return size;
+		}
 	}
-
-	
-	strcpy( files_content[ file_idx ], buffer ); 
-	
-	return size;
 }
 
 static struct fuse_operations operations = {

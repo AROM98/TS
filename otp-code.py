@@ -6,7 +6,7 @@ import os
 if len(sys.argv) >= 1:
     name = sys.argv[0]
 else:
-    raise "Wrong arguments"
+    raise Exception("Wrong arguments")
 
 key = pyotp.random_base32()
 
