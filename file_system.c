@@ -10,10 +10,11 @@
 #include <sys/types.h>
 #include <syslog.h> 
 #include <Python.h>
+#include <string.h>
 
 
  
-
+char cwd[PATH_MAX];
 // guarda os ficheiros criados
 char files[ 256 ][ 256 ];
 // indice
@@ -42,35 +43,56 @@ gid_t directories_gid[256];
 
 // para fazer os logs
 static void log_message(const char *message) {
-    openlog("HelloFUSE", LOG_PID, LOG_USER);  // Open connection to syslog
+    openlog("FUSE-LOGS", LOG_PID, LOG_USER);  // Open connection to syslog
     syslog(LOG_INFO, "%s", message);  // Log the message using syslog
     closelog();  // Close connection to syslog
 }
 
 // para correr o script python OTP
-void run_python_script() {
+int run_python_script() {
     
+	
 
-	char* filename = "/home/kubuntuu/Desktop/TS/TS/otp.py";
-    
+	//char* filename = "/home/pedro/TS/TS/otp.py";
+	//char* filename = "/home/kubuntuu/Desktop/TS/TS/otp.py";
+	char filename[PATH_MAX];
+	strcpy(filename,cwd);
+
+	char f[] = "/otp.py";
+	strcat(filename,f);
+    printf("file %s\n", filename);
+
+
+	Py_Initialize();
+	
+	// Criar uma lista de argumentos
+    PyObject *argList = PyList_New(0);
+    PyObject *arg = PyUnicode_FromString(cwd);
+    PyList_Append(argList, arg);
+
+	// Passar a lista de argumentos para o Python
+    PySys_SetObject("argv", argList);
+
     // Open the Python file
     FILE* file = fopen(filename, "r");
 
     if (file == NULL) {
 		perror("Error opening file");
         printf("Error opening script file\n");
-        return;
+        return -1;
     }
 
-	Py_Initialize();
-	PySys_SetArgv(0, "");
+	
 
     // Run the Python script
-    if (PyRun_SimpleFileExFlags(file, filename, 1, NULL) == -1) {
-        printf("Error running python script\n");
-    }
+    // if (PyRun_SimpleFileExFlags(file, filename, 1, NULL) == -1) {
+    //     printf("Error running python script\n");
+	// 	return -1;
+    // }
+	PyRun_SimpleFile(file, filename);
 
     Py_Finalize();
+	return 0;
 }
 
 
@@ -107,7 +129,7 @@ int get_file( const char *path ){
 static int getattr_act( const char *path, struct stat *st )
 {
 	// LOGS
-	printf("getattr called\n");
+	//printf("getattr called\n");
     log_message("[RSYSLOG] getattr called");
 	
 	// definição das permissoes 
@@ -141,7 +163,7 @@ static int getattr_act( const char *path, struct stat *st )
 static int readdir_act( const char *path, void *buffer, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi )
 {
 	//LOGS
-	printf("readdir called\n");
+	//printf("readdir called\n");
     log_message("[RSYSLOG] readdir called");
 
     int dir_id = is_dir(path);
@@ -181,7 +203,7 @@ static int readdir_act( const char *path, void *buffer, fuse_fill_dir_t filler, 
 static int read_act( const char *path, char *buffer, size_t size, off_t offset, struct fuse_file_info *fi ){
 	
 	//LOGS
-	printf("read called\n");
+	//printf("read called\n");
     log_message("[RSYSLOG] read called");
 
 	int file_id = get_file( path );
@@ -199,7 +221,8 @@ static int read_act( const char *path, char *buffer, size_t size, off_t offset, 
     }
 	else{
 		// se é o dono, então tem que se autenticar como tal.
-		run_python_script();
+		int flag = run_python_script();
+		if (flag == -1) return -EACCES;
 	}
 
 
@@ -218,10 +241,12 @@ static int read_act( const char *path, char *buffer, size_t size, off_t offset, 
 static int mkdir_act( const char *path, mode_t mode )
 {	
 	//LOGS
-	printf("mkdir called\n");
+	//printf("mkdir called\n");
     log_message("[RSYSLOG] mkdir called");
 
 	path++;
+
+
 	dir_ind++;
 	strcpy( directories[ dir_ind ], path);
 
@@ -238,7 +263,7 @@ static int mkdir_act( const char *path, mode_t mode )
 static int mknod_act( const char *path, mode_t mode, dev_t rdev )
 {	
 	//LOGS
-	printf("mknod called\n");
+	//printf("mknod called\n");
 	log_message("[RSYSLOG] mknod called");
 
 	path++;
@@ -261,14 +286,29 @@ static int mknod_act( const char *path, mode_t mode, dev_t rdev )
 static int write_act( const char *path, const char *buffer, size_t size, off_t offset, struct fuse_file_info *info )
 {
 	//LOGS
-	printf("write called\n");
+	//printf("write called\n");
 	log_message("[RSYSLOG] write called");
 	
 	int file_idx = get_file( path );
-	
+
 	if ( file_idx == -1 ) 
 		return;
 		
+	// para verificar se o user tem permissao de ler o ficheiro (se é o dono neste caso)
+	struct fuse_context *context;
+    context = fuse_get_context();  // Get context
+
+	// Check if the UID matches the file's owner
+    if (context->uid != files_uid[file_idx]) {
+        return -EACCES;  // Return an "Access denied" error
+    }
+	else{
+		// se é o dono, então tem que se autenticar como tal.
+		int flag = run_python_script();
+		if (flag == -1) return -EACCES;
+	}
+
+	
 	strcpy( files_content[ file_idx ], buffer ); 
 	
 	return size;
@@ -285,13 +325,13 @@ static struct fuse_operations operations = {
 
 int main(int argc, char *argv[]){   
 
-	char cwd[PATH_MAX];
-	if (getcwd(cwd, sizeof(cwd)) != NULL) {
-    	printf("Current working dir: %s\n", cwd);
-	} else {
+	if (getcwd(cwd, sizeof(cwd)) == NULL) {
+	
     	perror("getcwd() error");
     	return 1;
 	}
+    printf("Current working dir: %s\n", cwd);
+
 
     // Create a new arguments array with the -f option, to run in foreground
     char *argv_mod[] = { argv[0], argv[1], "-f", NULL };
